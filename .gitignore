@@ -1,0 +1,6 @@
+Manifest.toml
+results/*
+!results/.gitkeep
+.DS_Store
+*.jl.cov
+*.jl.mem
