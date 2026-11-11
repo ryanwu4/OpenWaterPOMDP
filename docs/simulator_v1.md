@@ -8,7 +8,7 @@ Decisions are tagged **[decided]** (chosen in the design interview) or **[defaul
 
 ## 1. World
 
-- **Course** [decided]: buoy at (L, 0) with L = 1500 m. Swimmers start at x = 0, with y spread over ±100 m.
+- **Course** [decided]: buoy at (L, 0) with L = 1500 m. Swimmers start at x = 0, with y spread over ±20 m (narrowed from ±100 m so drafting actually occurs).
 - **Start** [decided]: all swimmers, the agent included, start at t = 0 at a random y. Initial heading points at the buoy, plus a small Gaussian aiming error.
 - **Current** [decided]: one constant vector c = (cx, cy) per race, the same everywhere on the course and fixed for the race. It is drawn from a prior in the params.
 - **No contact** [decided]: swimmers don't collide or block each other and can overlap in space. They interact only through drafting.
@@ -67,7 +67,7 @@ Field swimmers follow the same motion. Their sight pauses and re-aims are events
 - **Field swimmer that is being followed meets a faster swimmer** [decided]: it releases its own follower, which could be the agent, and starts following.
 
 ### Following motion
-- **Lock behind** [decided]: the follower's position is leader position − g·(cos ψ_lead, sin ψ_lead). Its heading is set to ψ_lead, and its own noise and bias are off while it's locked [decided]. Entering the draft keeps the current gap g [decided]. The lateral offset is dropped when it locks on [default].
+- **Lock behind** [decided]: the follower's position is leader position − g·(cos ψ_lead, sin ψ_lead). Its heading is set to ψ_lead, and its own noise and bias are off while it's locked [decided]. Entering the draft keeps the current gap g [decided], except that a gap closer than g_nom is set to g_nom [default]. The lateral offset is dropped when it locks on [default].
 - **Gap update** [decided: catch-up at (1+β)v], applied per segment of length h:
 
   g′ = max(g_nom, g + a_lead − (1+β)·v·t_swim)
@@ -80,7 +80,7 @@ Field swimmers follow the same motion. Their sight pauses and re-aims are events
 
 ### 4.1 Inside `advance(world, T)` [default]
 
-**Start of the agent's step** (in `gen`, before calling `advance`): apply the agent's action. That means its turn, plus its follow/solo choice, checked on s.
+**Start of the agent's step** (in `gen`, before calling `advance`): apply the agent's action. Choosing solo releases it; if it's solo, the turn is applied; a sight is scheduled to start after τ₀. A request to follow goes into the first boundary's draft pass alongside the field's requests, so nearest-wins applies to the agent too [default].
 
 **Segments.** The interval [t, t + T] is split at every scheduled event:
 - the agent's sight pause starting and ending
@@ -97,29 +97,28 @@ It is also split at contact-check ticks at most h_max apart, so contacts can't b
 5. Check finishes along each swimmer's path in the segment. If the agent finishes, stop at once and return the exact finish time.
 
 **At each segment boundary:**
-1. Process events that fall exactly at this time:
-   - a pause starts or ends
-   - at the end of a field swimmer's pause, it re-aims at the buoy
-   - timers expire
-2. Do draft bookkeeping:
-   - releases (gap over g_max, leader finished, leader started following, duration expired)
-   - new field drafts, with the nearest-wins tie-break
+1. Releases: gap over g_max, leader finished, leader started following, duration expired.
+2. New drafts, with the nearest-wins tie-break.
+3. Releases again, so a leader that just started following can't leave an illegal chain.
+4. Start sight pauses that are due. This comes last so that a field swimmer released in steps 1–3 sights in the same instant.
+
+Pauses end when their timer runs out during the segment. A field swimmer re-aims at the buoy at that moment.
 
 Swimmers react to each other at every boundary, not once per agent step.
 
 ## 5. Field swimmers
 
 - **Sighting** [decided]: every N_k strokes, with each swimmer's schedule offset at random [decided]. Implemented as a countdown timer in seconds. When it expires, the swimmer pauses for τκ at that exact time, even partway through the agent's step.
-- **Re-aim** [decided]: at the end of the pause, heading ← true bearing to the buoy from the swimmer's current position + N(0, σ_aim²). Field swimmers don't compensate for the current.
+- **Re-aim** [decided]: at the end of the pause, heading ← true bearing to the buoy from the swimmer's current position + N(0, σ_aim²). Field swimmers don't compensate for the current [decided: keep the field naive], so in a cross-current they swim a curved path well off the line.
 - **Asymmetry** [default, deliberate]: a field swimmer re-aims as soon as its sight pause ends, while the agent's sight only informs its next turn.
-- **Drafting rule** [decided]: draft any faster swimmer (v_lead > v_self) they come into contact with, for their own fixed duration. Afterwards there is a cooldown before they may draft again [decided].
+- **Drafting rule** [decided]: draft any faster swimmer (v_lead > v_self) they come into contact with, for their own fixed duration. Afterwards there is a cooldown before they may draft again [decided]. A field swimmer doesn't start a draft during its own sight pause [default].
 - **While following** [decided]: no sighting. On release, a sight is due immediately.
 - **Per-swimmer variation** [decided]: each field swimmer has its own pace, heading bias, N_k and draft duration.
 - **Finishing** [default]: a field swimmer that finishes is frozen at the buoy and drops out of the race. Its follower is released.
 
 ## 6. Agent
 
-- **Pace** [decided]: a fixed parameter, while field paces are random around it.
+- **Pace** [decided]: a fixed parameter, while field paces are random around it. The default equals the field mean; the agent's pace relative to the field is an evaluation condition [decided], since it sets how many swimmers are worth drafting.
 - **Actions** [decided]: sight m ∈ {0, 1}, continuous turn δ, follow/solo.
 - **Follow** [decided]: follows the nearest eligible leader. The agent can't pick which one. Unlike field swimmers, it may follow slower swimmers.
 - **No re-draft cooldown** for the agent [decided].
@@ -155,7 +154,7 @@ Swimmers react to each other at every boundary, not once per agent step.
 | Symbol | Meaning | Proposed default | Units |
 |---|---|---|---|
 | L | buoy distance | 1500 | m |
-| y₀ range | start spread | U(−100, 100) | m |
+| y₀ range | start spread | U(−20, 20) [decided] | m |
 | r | finish radius | 3 | m |
 | t_cap | time cap | 3 · L / v | s |
 | v | agent pace | 1.3 | m/s |
@@ -168,9 +167,9 @@ Swimmers react to each other at every boundary, not once per agent step.
 | b | heading bias per swimmer | N(0, (0.15°/s)²) | rad/s |
 | σw | position noise | 0.2 | m/√s |
 | ‖c‖ | current speed | U(0, 0.3) | m/s |
-| ∠c | current direction | U(0, 2π) | rad |
+| ∠c | current direction | U(45°, 135°), mirrored to the other side with prob. ½ (mostly cross-course) [decided] | rad |
 | σ_aim | field re-aim error | 5° | rad |
-| β | draft speed boost | 0.10 | — |
+| β | draft speed boost | 0.20 [decided] | — |
 | g_nom | nominal draft gap | 0.5 | m |
 | g_max | max draft gap | 2.0 | m |
 | w_lat | draft zone half-width | 0.5 | m |

@@ -11,6 +11,13 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 
 For development, use a REPL with Revise: `julia --project=.`, then `using Revise, OpenWaterPOMDP`.
 
+Plotting lives in its own environment so the core package stays light:
+
+```bash
+julia --project=analysis -e 'using Pkg; Pkg.instantiate()'
+julia --project=analysis analysis/demo.jl [seed] [output.gif]   # race animation → results/demo.gif
+```
+
 ## Layout
 
 ```
@@ -34,4 +41,4 @@ sandbox/                  scratch work
 results/                  outputs (gitignored)
 ```
 
-Each `src` file's header describes what it is responsible for.
+2Each `src` file's header describes what it is responsible for.
